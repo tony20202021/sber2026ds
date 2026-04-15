@@ -27,8 +27,8 @@
 | `solution_2026_04_15_holidays_230` | 0.881 ✓ | 0.799 | 166.3s | — | 230 |
 | `solution_2026_04_15_gender_embedding` | 0.881 ✓ | 0.803 ✓ | 111.5s | — | 200 |
 | `solution_2026_04_15_mcc_interactions` | 0.883 ✓ | 0.802 ✓ | 112.2s | — | 200 |
-| `solution_2026_04_15_super_100` | 0.874 | 0.789 | 87.7s | — | 100 |
-| `solution_2026_04_15_super_200` | 0.882 ✓ | **0.807 ✓** | 143.2s | — | 200 |
+| `solution_2026_04_15_super_100` | 0.874 | 0.789 | 48.0s | — | 100 |
+| `solution_2026_04_15_super_200` | 0.881 ✓ | 0.804 ✓ | 153.7s | — | 200 |
 | **`solution_2026_04_15_super_all`** | **0.885 ✓** | **0.803 ✓** | 466.0s | — | 685 |
 
 ---
@@ -62,13 +62,3 @@ python download_dataset.py  # скачать данные в ./data/
 
 Скрипты решений — в соответствующих ветках.
 
----
-
-## Идеи для продолжения
-
-- Word2Vec / seq2vec по последовательности MCC-кодов (транзакции как «текст»)
-- CatBoost, XGBoost, стекинг нескольких моделей
-- Neural network с learnable embedding для MCC/tr_type
-- Bayesian hyperparameter search (Optuna)
-- Per-tr_type × time interactions (аналог MCC × time)
-- Больше MCC для взаимодействий (сейчас top-20, можно top-40)
