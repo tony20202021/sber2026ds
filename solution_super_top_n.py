@@ -1,11 +1,10 @@
 """
-solution_super_all.py — все признаки (685+) без фильтрации, 5-fold LGB.
+solution_super_top_n.py — super_100 и super_200 из feature_importance_all.csv (super_all).
 
-Отличие от solution_super_200.py: нет шага отбора top-200.
-LightGBM обучается сразу на всех кандидатах — модель сама выбирает
-нужные фичи через регуляризацию (reg_alpha, reg_lambda, min_child_samples).
+Берёт top-N фич по importance из полного рейтинга 685 признаков,
+обучает 5-fold LGB ансамбль, сохраняет модели и метрики.
 """
-import os, time, json, gc
+import os, time, json, gc, joblib
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import StratifiedKFold
@@ -14,10 +13,8 @@ import lightgbm as lgb
 
 from solution import load_split, generate_features, add_target_encoding, LGB_PARAMS
 
-RESULTS_DIR  = "results/solution_2026_04_15_super_all"
-os.makedirs(RESULTS_DIR, exist_ok=True)
+FI_CSV      = "results/solution_2026_04_15_super_all/feature_importance_all.csv"
 OVERALL_PATH = "results/overall.json"
-BRANCH       = "solution_2026_04_15_super_all"
 MCC_EMB_CSV  = "results/gender_embeddings/mcc_gender.csv"
 TR_EMB_CSV   = "results/gender_embeddings/tr_gender.csv"
 
@@ -148,6 +145,7 @@ def attach(X, feat_df, cust_order):
     new_cols = [c for c in aligned.columns if c not in X.columns]
     return pd.concat([X.reset_index(drop=True), aligned[new_cols]], axis=1)
 
+
 # ── Load & generate all features ─────────────────────────────────────────────
 print("Loading splits...")
 train_df = load_split("train")
@@ -156,7 +154,7 @@ test_df  = load_split("test")
 
 top_mcc_codes = train_df["mcc_code"].value_counts().nlargest(TOP_MCC_N).index.tolist()
 
-print("Generating base features (A)...")
+print("Generating base features...")
 X_train, y_train, top_mcc, top_tr = generate_features(train_df)
 X_val,   y_val,   _,       _      = generate_features(val_df,  top_mcc=top_mcc, top_tr=top_tr)
 X_test,  y_test,  _,       _      = generate_features(test_df, top_mcc=top_mcc, top_tr=top_tr)
@@ -165,18 +163,11 @@ print("Adding target encoding...")
 X_train, X_val, X_test = add_target_encoding(
     X_train, y_train, X_val, X_test, train_df, val_df, test_df)
 
-print("Computing extra features (B)...")
 b_tr = extra_features(train_df); b_vl = extra_features(val_df); b_te = extra_features(test_df)
-
-print(f"Computing MCC interactions + depth (C+D)...")
 cd_tr = mcc_interaction_features(train_df, top_mcc_codes)
 cd_vl = mcc_interaction_features(val_df,   top_mcc_codes)
 cd_te = mcc_interaction_features(test_df,  top_mcc_codes)
-
-print("Computing holiday features (E)...")
 e_tr = holiday_features(train_df); e_vl = holiday_features(val_df); e_te = holiday_features(test_df)
-
-print("Computing gender embedding features (F)...")
 f_tr = gender_emb_features(train_df, mcc_emb, tr_emb)
 f_vl = gender_emb_features(val_df,   mcc_emb, tr_emb)
 f_te = gender_emb_features(test_df,  mcc_emb, tr_emb)
@@ -192,31 +183,45 @@ for a, b, c in [(b_tr,b_vl,b_te),(cd_tr,cd_vl,cd_te),(e_tr,e_vl,e_te),(f_tr,f_vl
     X_test  = attach(X_test,  c, cust_test)
 del b_tr,b_vl,b_te,cd_tr,cd_vl,cd_te,e_tr,e_vl,e_te,f_tr,f_vl,f_te; gc.collect()
 
-n_features = X_train.shape[1]
-print(f"Total features: {n_features}")
+print(f"Total candidate features: {X_train.shape[1]}")
 
-# ── 5-fold ensemble на ВСЕХ фичах (без отбора) ───────────────────────────────
-def fit_predict_proba(X_tr, y_tr, X_vl, y_vl, X_te):
-    X_full = pd.concat([X_tr, X_vl]).reset_index(drop=True)
-    y_full = pd.concat([y_tr, y_vl]).reset_index(drop=True)
+# ── Загружаем рейтинг из super_all ───────────────────────────────────────────
+fi = pd.read_csv(FI_CSV)
+print(f"Loaded importance ranking: {len(fi)} features")
 
-    # Early stopping на val для определения best_iter + сохраняем importance
+
+def run_top_n(n):
+    branch     = f"solution_2026_04_15_super_{n}"
+    results_dir = f"results/{branch}"
+    os.makedirs(results_dir, exist_ok=True)
+
+    top_n = fi["feature"].head(n).tolist()
+    top_n = [f for f in top_n if f in X_train.columns]
+    print(f"\n{'='*50}")
+    print(f"Running top-{n}: {len(top_n)} features")
+
+    X_tr = X_train[top_n]
+    X_vl = X_val[top_n]
+    X_te = X_test[top_n]
+
+    # Early stopping → best_iter
     probe = lgb.LGBMClassifier(n_estimators=3000, random_state=0, **LGB_PARAMS)
-    probe.fit(X_tr, y_tr,
-              eval_set=[(X_vl, y_vl)],
+    probe.fit(X_tr, y_train,
+              eval_set=[(X_vl, y_val)],
               callbacks=[lgb.early_stopping(150, verbose=False),
                          lgb.log_evaluation(period=200)])
     best_iter = int(probe.best_iteration_ * 1.1)
     print(f"  best_iter (×1.1): {best_iter}")
-    fi = pd.DataFrame({"feature": X_tr.columns,
-                        "importance": probe.feature_importances_}
-                      ).sort_values("importance", ascending=False)
-    fi.to_csv(f"{RESULTS_DIR}/feature_importance_all.csv", index=False)
-    print(f"  Saved feature importance → {RESULTS_DIR}/feature_importance_all.csv")
     del probe; gc.collect()
 
+    # 5-fold ensemble
+    X_full = pd.concat([X_tr, X_vl]).reset_index(drop=True)
+    y_full = pd.concat([y_train, y_val]).reset_index(drop=True)
+
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    models = []
     test_probas = []
+    t0 = time.perf_counter()
     for fold, (tr_idx, vl_idx) in enumerate(skf.split(X_full, y_full)):
         m = lgb.LGBMClassifier(n_estimators=best_iter, random_state=fold, **LGB_PARAMS)
         m.fit(X_full.iloc[tr_idx], y_full.iloc[tr_idx],
@@ -224,47 +229,52 @@ def fit_predict_proba(X_tr, y_tr, X_vl, y_vl, X_te):
         oof_auc = roc_auc_score(y_full.iloc[vl_idx],
                                  m.predict_proba(X_full.iloc[vl_idx])[:, 1])
         test_probas.append(m.predict_proba(X_te)[:, 1])
+        models.append(m)
         print(f"  fold {fold+1}/5  OOF AUC: {oof_auc:.4f}")
-        del m; gc.collect()
-    return np.mean(test_probas, axis=0)
+    train_time = round(time.perf_counter() - t0, 1)
 
-print(f"\n5-fold ensemble on ALL {n_features} features...")
-t0 = time.perf_counter()
-y_pred_proba = fit_predict_proba(X_train, y_train, X_val, y_val, X_test)
-train_time = round(time.perf_counter() - t0, 1)
+    # Сохраняем модели
+    model_path = f"{results_dir}/models.pkl"
+    joblib.dump({"models": models, "feature_names": top_n, "best_iter": best_iter}, model_path)
+    print(f"  Saved models → {model_path}")
+    del models; gc.collect()
 
-y_pred = (y_pred_proba >= 0.5).astype(int)
-auc  = round(roc_auc_score(y_test, y_pred_proba), 4)
-acc  = round(accuracy_score(y_test, y_pred), 4)
-prec = round(precision_score(y_test, y_pred), 4)
-rec  = round(recall_score(y_test, y_pred), 4)
+    y_pred_proba = np.mean(test_probas, axis=0)
+    y_pred = (y_pred_proba >= 0.5).astype(int)
+    auc  = round(roc_auc_score(y_test, y_pred_proba), 4)
+    acc  = round(accuracy_score(y_test, y_pred), 4)
+    prec = round(precision_score(y_test, y_pred), 4)
+    rec  = round(recall_score(y_test, y_pred), 4)
 
-print(f"\n=== Test metrics ===")
-print(f"  auc_score:       {auc}")
-print(f"  accuracy_score:  {acc}")
-print(f"  precision_score: {prec}")
-print(f"  recall_score:    {rec}")
-print(f"  train_time:      {train_time}s")
-print(f"\nROC AUC > 0.88: {'OK' if auc>0.88 else 'FAIL'}  |  Accuracy > 0.80: {'OK' if acc>0.80 else 'FAIL'}")
+    print(f"  auc={auc}  acc={acc}  train={train_time}s")
+    print(f"  ROC AUC > 0.88: {'OK' if auc>0.88 else 'FAIL'}  |  Accuracy > 0.80: {'OK' if acc>0.80 else 'FAIL'}")
 
-# ── Update overall.json ───────────────────────────────────────────────────────
-with open(OVERALL_PATH) as f:
-    overall = json.load(f)
-overall = [e for e in overall if e["branch"] != BRANCH]
-overall.append({
-    "branch": BRANCH,
-    "date": "2026-04-15",
-    "metrics": {"auc_score": auc, "accuracy_score": acc,
-                 "precision_score": prec, "recall_score": rec},
-    "timing": {"train_time_s": train_time},
-    "n_features": n_features,
-    "comment": (
-        f"Super-all: все {n_features} фич без фильтрации. "
-        f"A=base376 + B=hour_shares+pos/neg(30) + C=MCC×time(160) + "
-        f"D=MCC_depth(80) + E=holidays(30) + F=gender_emb(9). "
-        f"LightGBM 5-fold ensemble, early stopping на val, threshold=0.5."
-    ),
-})
-with open(OVERALL_PATH, "w", encoding="utf-8") as f:
-    json.dump(overall, f, ensure_ascii=False, indent=2)
-print(f"\nUpdated: {OVERALL_PATH}")
+    # overall.json
+    with open(OVERALL_PATH) as f:
+        overall = json.load(f)
+    overall = [e for e in overall if e["branch"] != branch]
+    overall.append({
+        "branch": branch,
+        "date": "2026-04-15",
+        "metrics": {"auc_score": auc, "accuracy_score": acc,
+                     "precision_score": prec, "recall_score": rec},
+        "timing": {"train_time_s": train_time},
+        "n_features": len(top_n),
+        "models_path": model_path,
+        "comment": (
+            f"Super-{n}: top-{n} фич из рейтинга super_all (685 кандидатов). "
+            f"LightGBM 5-fold ensemble, threshold=0.5. "
+            f"Модели сохранены: {model_path}"
+        ),
+    })
+    with open(OVERALL_PATH, "w", encoding="utf-8") as f:
+        json.dump(overall, f, ensure_ascii=False, indent=2)
+    return auc, acc
+
+
+auc100, acc100 = run_top_n(100)
+auc200, acc200 = run_top_n(200)
+
+print(f"\n{'='*50}")
+print(f"super_100: AUC={auc100}  Acc={acc100}")
+print(f"super_200: AUC={auc200}  Acc={acc200}")
