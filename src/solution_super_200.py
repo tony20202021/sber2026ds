@@ -285,6 +285,7 @@ def main():
         y_full = pd.concat([y_tr, y_vl]).reset_index(drop=True)
         skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
         test_probas = []
+        models = []
         for fold, (tr_idx, vl_idx) in enumerate(skf.split(X_full, y_full)):
             m = lgb.LGBMClassifier(n_estimators=best_iter, random_state=fold, **LGB_PARAMS)
             m.fit(X_full.iloc[tr_idx], y_full.iloc[tr_idx],
@@ -292,12 +293,13 @@ def main():
             oof_auc = roc_auc_score(y_full.iloc[vl_idx],
                                      m.predict_proba(X_full.iloc[vl_idx])[:, 1])
             test_probas.append(m.predict_proba(X_te)[:, 1])
+            models.append(m)
             print(f"  fold {fold+1}/5  OOF AUC: {oof_auc:.4f}")
-        return np.mean(test_probas, axis=0)
+        return np.mean(test_probas, axis=0), models
 
     print("\nStep 2: 5-fold ensemble on top-200...")
     t0 = time.perf_counter()
-    y_pred_proba = fit_predict_proba(X_train_s, y_train, X_val_s, y_val, X_test_s)
+    y_pred_proba, models = fit_predict_proba(X_train_s, y_train, X_val_s, y_val, X_test_s)
     train_time = round(time.perf_counter() - t0, 1)
 
     y_pred = (y_pred_proba >= 0.5).astype(int)
@@ -313,6 +315,11 @@ def main():
     print(f"  recall_score:    {rec}")
     print(f"  train_time:      {train_time}s")
     print(f"\nROC AUC > 0.88: {'OK' if auc>0.88 else 'FAIL'}  |  Accuracy > 0.80: {'OK' if acc>0.80 else 'FAIL'}")
+
+    import joblib
+    model_path = f"{RESULTS_DIR}/models.pkl"
+    joblib.dump({"models": models, "feature_names": top200, "best_iter": best_iter}, model_path)
+    print(f"Saved models → {model_path}")
 
     os.makedirs(os.path.dirname(OVERALL_PATH), exist_ok=True)
     overall = json.load(open(OVERALL_PATH)) if os.path.exists(OVERALL_PATH) else []
