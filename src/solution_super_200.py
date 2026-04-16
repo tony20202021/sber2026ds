@@ -22,7 +22,6 @@ from solution import load_split, generate_features, add_target_encoding, LGB_PAR
 RESULTS_DIR  = "results/solution_2026_04_15_super_200"
 OVERALL_PATH = "results/overall.json"
 BRANCH       = "solution_2026_04_15_super_200"
-FI_CSV       = "results/solution_2026_04_06/feature_importance.csv"
 MCC_EMB_CSV  = "results/gender_embeddings/mcc_gender.csv"
 TR_EMB_CSV   = "results/gender_embeddings/tr_gender.csv"
 
@@ -246,8 +245,6 @@ def main():
     fi = pd.Series(probe.feature_importances_, index=candidates).sort_values(ascending=False)
     top200 = fi.head(200).index.tolist()
 
-    fi_df = pd.read_csv(FI_CSV)
-    base376 = set(fi_df["feature"].tolist())
     extra_names = set([f"hour_share_{h}" for h in range(24)] +
                       ["pos_min","pos_max","pos_median","neg_min","neg_max","neg_median"])
     int_names = set(f"mcc{m}_{s}" for m in top_mcc_codes
@@ -259,8 +256,9 @@ def main():
     gemb_names = {"mcc_gender_diff_mean","mcc_gender_diff_std","mcc_male_sim_mean",
                   "mcc_female_sim_mean","mcc_gender_diff_amt_wt",
                   "tr_gender_diff_mean","tr_gender_diff_std","tr_male_sim_mean","tr_female_sim_mean"}
+    known = extra_names | int_names | depth_names | hol_names | gemb_names
 
-    groups = {"A_base":      [f for f in top200 if f in base376],
+    groups = {"A_base":      [f for f in top200 if f not in known],
               "B_extra":     [f for f in top200 if f in extra_names],
               "C_mcc_time":  [f for f in top200 if f in int_names],
               "D_mcc_depth": [f for f in top200 if f in depth_names],
