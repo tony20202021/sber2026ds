@@ -314,8 +314,8 @@ def main():
     print(f"  train_time:      {train_time}s")
     print(f"\nROC AUC > 0.88: {'OK' if auc>0.88 else 'FAIL'}  |  Accuracy > 0.80: {'OK' if acc>0.80 else 'FAIL'}")
 
-    with open(OVERALL_PATH) as f:
-        overall = json.load(f)
+    os.makedirs(os.path.dirname(OVERALL_PATH), exist_ok=True)
+    overall = json.load(open(OVERALL_PATH)) if os.path.exists(OVERALL_PATH) else []
     overall = [e for e in overall if e["branch"] != BRANCH]
     overall.append({
         "branch": BRANCH,
