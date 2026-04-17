@@ -321,6 +321,17 @@ def main():
     joblib.dump({"models": models, "feature_names": top200, "best_iter": best_iter}, model_path)
     print(f"Saved models → {model_path}")
 
+    test_raw = pd.read_csv("data/test.csv")
+    customer_pred = pd.DataFrame({
+        "customer_id": cust_test,
+        "prediction":  y_pred,
+        "prediction_proba": y_pred_proba.round(6),
+    })
+    test_out = test_raw.merge(customer_pred, on="customer_id", how="left")
+    pred_path = f"{RESULTS_DIR}/test_predictions.csv"
+    test_out.to_csv(pred_path, index=False)
+    print(f"Saved predictions → {pred_path}")
+
     os.makedirs(os.path.dirname(OVERALL_PATH), exist_ok=True)
     overall = json.load(open(OVERALL_PATH)) if os.path.exists(OVERALL_PATH) else []
     overall = [e for e in overall if e["branch"] != BRANCH]
