@@ -1,0 +1,26 @@
+[
+  {
+    "branch": "solution_2026_04_15_super_200",
+    "date": "2026-04-15",
+    "metrics": {
+      "auc_score": 0.8823,
+      "accuracy_score": 0.8071,
+      "precision_score": 0.8356,
+      "recall_score": 0.7232
+    },
+    "timing": {
+      "train_time_s": 136.2
+    },
+    "n_features": 200,
+    "feature_groups_in_top200": {
+      "A_base": 95,
+      "B_extra": 24,
+      "C_mcc_time": 35,
+      "D_mcc_depth": 12,
+      "E_holiday": 25,
+      "F_gender_emb": 9
+    },
+    "total_candidates": 685,
+    "comment": "Super-200: все типы фич (A=base376, B=hour_shares+pos/neg, C=MCC×time, D=MCC_depth(neg_ratio/max/cv/cnt), E=holidays, F=gender_emb) — 685 кандидатов → top-200 по LGB importance. Модель: LightGBM 5-fold ensemble на train+val, threshold=0.5."
+  }
+]
