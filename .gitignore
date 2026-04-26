@@ -1,5 +1,6 @@
 data/
-results/
+results/*
+!results/overall.json
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
